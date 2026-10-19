@@ -1,0 +1,221 @@
+{
+  "note": "The symbol types the detector learns. Order matters: a class's position is its numeric id. Append new classes at the end; never reorder.",
+  "classes": [
+    {
+      "name": "head_black",
+      "smufl": [
+        "E0A4"
+      ],
+      "description": "Filled round notehead (quarter, eighth, 16th... drum hits)"
+    },
+    {
+      "name": "head_half",
+      "smufl": [
+        "E0A3"
+      ],
+      "description": "Hollow round notehead (half note)"
+    },
+    {
+      "name": "head_whole",
+      "smufl": [
+        "E0A2"
+      ],
+      "description": "Whole-note notehead (no stem)"
+    },
+    {
+      "name": "head_x",
+      "smufl": [
+        "E0A9",
+        "E0A8",
+        "E0A7",
+        "E0B6"
+      ],
+      "description": "X notehead (hi-hat, ride, crash)"
+    },
+    {
+      "name": "head_circle_x",
+      "smufl": [
+        "E0B3"
+      ],
+      "description": "Circled X notehead (open hi-hat in some keys)"
+    },
+    {
+      "name": "rest_whole",
+      "smufl": [
+        "E4E3"
+      ],
+      "description": "Whole rest"
+    },
+    {
+      "name": "rest_half",
+      "smufl": [
+        "E4E4"
+      ],
+      "description": "Half rest"
+    },
+    {
+      "name": "rest_quarter",
+      "smufl": [
+        "E4E5"
+      ],
+      "description": "Quarter rest"
+    },
+    {
+      "name": "rest_8th",
+      "smufl": [
+        "E4E6"
+      ],
+      "description": "Eighth rest"
+    },
+    {
+      "name": "rest_16th",
+      "smufl": [
+        "E4E7"
+      ],
+      "description": "16th rest"
+    },
+    {
+      "name": "rest_32nd",
+      "smufl": [
+        "E4E8"
+      ],
+      "description": "32nd rest"
+    },
+    {
+      "name": "flag_8th",
+      "smufl": [
+        "E240",
+        "E241"
+      ],
+      "description": "Single flag on an unbeamed eighth note"
+    },
+    {
+      "name": "flag_16th",
+      "smufl": [
+        "E242",
+        "E243"
+      ],
+      "description": "Double flag on an unbeamed 16th note"
+    },
+    {
+      "name": "flag_32nd",
+      "smufl": [
+        "E244",
+        "E245"
+      ],
+      "description": "Triple flag on an unbeamed 32nd note"
+    },
+    {
+      "name": "beam",
+      "smufl": [],
+      "description": "One beam line joining stems (a 16th group has two stacked beams)"
+    },
+    {
+      "name": "dot",
+      "smufl": [
+        "E1E7"
+      ],
+      "description": "Augmentation dot after a notehead or rest"
+    },
+    {
+      "name": "clef_percussion",
+      "smufl": [
+        "E069",
+        "E06A"
+      ],
+      "description": "Percussion clef (two thick vertical bars)"
+    },
+    {
+      "name": "timesig_0",
+      "smufl": [
+        "E080"
+      ],
+      "description": "Digit 0 in a time signature"
+    },
+    {
+      "name": "timesig_1",
+      "smufl": [
+        "E081"
+      ],
+      "description": "Digit 1 in a time signature"
+    },
+    {
+      "name": "timesig_2",
+      "smufl": [
+        "E082"
+      ],
+      "description": "Digit 2 in a time signature"
+    },
+    {
+      "name": "timesig_3",
+      "smufl": [
+        "E083"
+      ],
+      "description": "Digit 3 in a time signature"
+    },
+    {
+      "name": "timesig_4",
+      "smufl": [
+        "E084"
+      ],
+      "description": "Digit 4 in a time signature"
+    },
+    {
+      "name": "timesig_5",
+      "smufl": [
+        "E085"
+      ],
+      "description": "Digit 5 in a time signature"
+    },
+    {
+      "name": "timesig_6",
+      "smufl": [
+        "E086"
+      ],
+      "description": "Digit 6 in a time signature"
+    },
+    {
+      "name": "timesig_7",
+      "smufl": [
+        "E087"
+      ],
+      "description": "Digit 7 in a time signature"
+    },
+    {
+      "name": "timesig_8",
+      "smufl": [
+        "E088"
+      ],
+      "description": "Digit 8 in a time signature"
+    },
+    {
+      "name": "timesig_9",
+      "smufl": [
+        "E089"
+      ],
+      "description": "Digit 9 in a time signature"
+    },
+    {
+      "name": "accent",
+      "smufl": [
+        "E4A0",
+        "E4A1"
+      ],
+      "description": "Accent mark (>) above or below a note"
+    },
+    {
+      "name": "head_slash",
+      "smufl": [
+        "E100",
+        "E101"
+      ],
+      "description": "Slash notehead (rhythm slashes; Verovio also draws MusicXML circle-x this way)"
+    }
+  ],
+  "normalization": {
+    "staff_space_px": 16,
+    "crop_spaces_above_top_line": 6,
+    "crop_spaces_below_bottom_line": 6,
+    "explanation": "Every training and inference image is one system cropped to a band around its staff and scaled so staff lines are 16 px apart, making the image 256 px tall."
+  }
+}

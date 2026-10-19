@@ -1,0 +1,20 @@
+[project]
+name = "beatmark-omr"
+version = "0.1.0"
+description = "Training pipeline for Beatmark's drum notation symbol detector"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "albumentations>=2.0",
+    "opencv-python-headless>=4.10",
+    "numpy>=1.26",
+    "pillow>=10",
+    "tqdm>=4.66",
+    "onnx>=1.17",
+    "onnxruntime>=1.20",
+    "pypdfium2>=4.30",
+]
+
+[tool.uv]
+package = false
