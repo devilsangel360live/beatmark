@@ -1,6 +1,6 @@
 import { findInstrument, staffStepToPitch, type InstrumentDef, type Limb } from "../core/drumKit";
 import type { NoteEvent, Project } from "../core/project";
-import { chordsForLimb, timeSignatureAt, validateMeasure } from "../core/score";
+import { chordsForLimb, tieTargets, timeSignatureAt, tupletGroups, validateMeasure } from "../core/score";
 import { durationTicks, measureTicks, PPQ, restsForGap, type DurationValue, type NoteDuration } from "../core/time";
 
 const TYPE_NAMES: Record<DurationValue, string> = {
@@ -44,6 +44,8 @@ export function exportMusicXml(project: Project): ExportResult {
 
   let unresolved = 0;
   const invalidMeasures: number[] = [];
+  const ties = tieTargets(score);
+  const tiedTo = new Set(ties.values());
 
   score.measures.forEach((measure, i) => {
     const ts = timeSignatureAt(score, i);
@@ -64,6 +66,9 @@ export function exportMusicXml(project: Project): ExportResult {
         `      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo}</per-minute></metronome></direction-type><sound tempo="${score.tempo}"/></direction>`,
       );
     }
+    if (measure.dynamic) {
+      lines.push(`      <direction placement="below"><direction-type><dynamics><${measure.dynamic}/></dynamics></direction-type></direction>`);
+    }
     if (validateMeasure(score, i, map).length) invalidMeasures.push(number);
 
     const limbs: Limb[] = chordsForLimb(measure, map, "feet").length ? ["hands", "feet"] : ["hands"];
@@ -79,12 +84,28 @@ export function exportMusicXml(project: Project): ExportResult {
       if (pos < length) restsForGap(pos, length, ts).forEach((r) => items.push({ ...r }));
 
       const beams = beamsFor(items, beamGroupTicks(ts));
+      const tuplets = new Map<number, { tuplet: 3 | 6; edge?: "start" | "stop" }>();
+      for (const g of tupletGroups(items)) {
+        for (let t = g.first; t <= g.last; t++) {
+          tuplets.set(t, { tuplet: g.tuplet, edge: t === g.first ? "start" : t === g.last ? "stop" : undefined });
+        }
+      }
       items.forEach((item, i) => {
         if (!item.chord) return lines.push(rest(item.duration, limb));
+        // Grace notes precede the whole chord.
+        for (const e of item.chord) lines.push(...graceNotes(e, findInstrument(map, e.instrument), limb));
         item.chord.forEach((e, j) => {
           if (e.unresolved) unresolved++;
-          // Beams belong to the chord's stem, so only the first note carries them.
-          lines.push(note(e, findInstrument(map, e.instrument), item.duration, limb, j > 0, j === 0 ? beams[i] : []));
+          lines.push(
+            note(e, findInstrument(map, e.instrument), item.duration, limb, {
+              chord: j > 0,
+              // Beams belong to the chord's stem, so only the first note carries them.
+              beams: j === 0 ? beams[i] : [],
+              tuplet: tuplets.get(i),
+              tieStart: ties.has(e.id),
+              tieStop: tiedTo.has(e.id),
+            }),
+          );
         });
       });
     });
@@ -159,26 +180,67 @@ export function beamsFor(items: VoiceItem[], groupTicks: number): string[][] {
   return out;
 }
 
-function note(e: NoteEvent, def: InstrumentDef, d: NoteDuration, limb: Limb, chord: boolean, beams: string[] = []): string {
-  const { step, octave } = staffStepToPitch(def.staffStep);
+interface NoteMarks {
+  chord: boolean;
+  beams: string[];
+  /** Where this note sits in a tuplet group; groups carry <time-modification> on every note. */
+  tuplet?: { tuplet: 3 | 6; edge?: "start" | "stop" };
+  tieStart: boolean;
+  tieStop: boolean;
+}
+
+function note(e: NoteEvent, def: InstrumentDef, d: NoteDuration, limb: Limb, marks: NoteMarks): string {
+  const notations = [
+    marks.tieStop ? `<tied type="stop"/>` : "",
+    marks.tieStart ? `<tied type="start"/>` : "",
+    marks.tuplet?.edge ? `<tuplet type="${marks.tuplet.edge}" bracket="no"/>` : "",
+    e.articulations.includes("accent") ? "<articulations><accent/></articulations>" : "",
+  ].join("");
   const parts = [
-    chord ? "<chord/>" : "",
-    `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>`,
+    marks.chord ? "<chord/>" : "",
+    unpitched(def),
     `<duration>${durationTicks(d)}</duration>`,
+    marks.tieStop ? `<tie type="stop"/>` : "",
+    marks.tieStart ? `<tie type="start"/>` : "",
     `<instrument id="${instId(def)}"/>`,
     `<voice>${VOICE_NUMBER[limb]}</voice>`,
     `<type>${TYPE_NAMES[d.value]}</type>`,
     d.dots ? "<dot/>" : "",
+    marks.tuplet
+      ? `<time-modification><actual-notes>${marks.tuplet.tuplet}</actual-notes><normal-notes>${marks.tuplet.tuplet === 3 ? 2 : 4}</normal-notes></time-modification>`
+      : "",
     `<stem>${limb === "hands" ? "up" : "down"}</stem>`,
-    def.notehead === "x" ? "<notehead>x</notehead>" : def.notehead === "circle-x" ? "<notehead>circle-x</notehead>" : "",
-    e.articulations.includes("ghost") && def.notehead === "normal" ? `<notehead parentheses="yes">normal</notehead>` : "",
-    ...beams.map((b) => {
+    noteheadXml(def, e),
+    ...marks.beams.map((b) => {
       const [number, kind] = b.split(":");
       return `<beam number="${number}">${kind}</beam>`;
     }),
-    e.articulations.includes("accent") ? "<notations><articulations><accent/></articulations></notations>" : "",
+    notations ? `<notations>${notations}</notations>` : "",
   ];
   return `      <note>${parts.join("")}</note>`;
+}
+
+function unpitched(def: InstrumentDef): string {
+  const { step, octave } = staffStepToPitch(def.staffStep);
+  return `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>`;
+}
+
+function noteheadXml(def: InstrumentDef, e?: NoteEvent): string {
+  if (def.notehead === "x") return "<notehead>x</notehead>";
+  if (def.notehead === "circle-x") return "<notehead>circle-x</notehead>";
+  return e?.articulations.includes("ghost") ? `<notehead parentheses="yes">normal</notehead>` : "";
+}
+
+/** Grace notes written before the principal note: a slashed eighth (flam) or two beamed 16ths (drag). */
+function graceNotes(e: NoteEvent, def: InstrumentDef, limb: Limb): string[] {
+  const kind = e.articulations.includes("drag") ? "drag" : e.articulations.includes("flam") ? "flam" : null;
+  if (!kind) return [];
+  const common = (type: string, extra = "") =>
+    `${unpitched(def)}<instrument id="${instId(def)}"/><voice>${VOICE_NUMBER[limb]}</voice><type>${type}</type><stem>up</stem>${noteheadXml(def)}${extra}`;
+  if (kind === "flam") return [`      <note><grace slash="yes"/>${common("eighth")}</note>`];
+  return ["begin", "end"].map(
+    (edge) => `      <note><grace/>${common("16th", `<beam number="1">${edge}</beam><beam number="2">${edge}</beam>`)}</note>`,
+  );
 }
 
 function rest(d: NoteDuration, limb: Limb): string {

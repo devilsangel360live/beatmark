@@ -49,13 +49,21 @@ def main() -> None:
         ref = model([image])[0]
     sess = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])
     boxes, labels, scores = sess.run(None, {"image": image.numpy()})
-    keep_ref = ref["scores"].numpy() >= 0.5
-    keep_onnx = scores >= 0.5
-    print(f"PyTorch found {keep_ref.sum()} symbols, ONNX Runtime found {keep_onnx.sum()}")
-    if keep_ref.sum() != keep_onnx.sum():
+    a = confident(ref["boxes"].numpy(), ref["labels"].numpy(), ref["scores"].numpy())
+    b = confident(boxes, labels, scores)
+    print(f"PyTorch found {len(a)} symbols, ONNX Runtime found {len(b)}")
+    if len(a) != len(b) or any(x[0] != y[0] for x, y in zip(a, b)):
         raise SystemExit("Mismatch between PyTorch and ONNX outputs — do not ship this file.")
-    diff = np.abs(ref["boxes"].numpy()[keep_ref] - boxes[keep_onnx]).max() if keep_ref.any() else 0.0
+    diff = max((np.abs(x[1] - y[1]).max() for x, y in zip(a, b)), default=0.0)
     print(f"Largest box difference: {diff:.3f} px — {'OK' if diff < 1.0 else 'TOO LARGE'}")
+
+
+def confident(boxes, labels, scores, threshold=0.5):
+    """Detections above the threshold in a fixed order. Ties in score (common at 1.00)
+    can come back in a different order from each runtime, so compare sorted lists."""
+    keep = scores >= threshold
+    rows = sorted(zip(labels[keep].tolist(), boxes[keep].tolist()), key=lambda r: (r[0], r[1]))
+    return [(label, np.array(box)) for label, box in rows]
 
 
 if __name__ == "__main__":

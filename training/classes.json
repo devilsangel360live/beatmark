@@ -210,6 +210,75 @@
         "E101"
       ],
       "description": "Slash notehead (rhythm slashes; Verovio also draws MusicXML circle-x this way)"
+    },
+    {
+      "name": "grace_head",
+      "smufl": [],
+      "description": "Small notehead of a flam or drag grace note (same glyph as a normal notehead, drawn at ~75% size)"
+    },
+    {
+      "name": "dynamic",
+      "smufl": [
+        "E520",
+        "E521",
+        "E522",
+        "E523",
+        "E524",
+        "E525",
+        "E526",
+        "E527",
+        "E528",
+        "E529",
+        "E52A",
+        "E52B",
+        "E52C",
+        "E52D",
+        "E52E",
+        "E52F",
+        "E530",
+        "E531",
+        "E532",
+        "E533",
+        "E534",
+        "E535",
+        "E536",
+        "E537",
+        "E538",
+        "E539",
+        "E53A",
+        "E53B",
+        "E53C",
+        "E53D",
+        "E53E",
+        "E53F",
+        "E540",
+        "E541"
+      ],
+      "description": "Dynamic marking glyph such as p, mf, ff"
+    },
+    {
+      "name": "multirest",
+      "smufl": [],
+      "description": "Thick horizontal bar of a multi-bar rest; its count above uses the timesig_N digit classes"
+    },
+    {
+      "name": "tie",
+      "smufl": [],
+      "description": "Tie arc joining two notes of the same drum"
+    },
+    {
+      "name": "tuplet_3",
+      "smufl": [
+        "E883"
+      ],
+      "description": "Tuplet number 3 (triplet)"
+    },
+    {
+      "name": "tuplet_6",
+      "smufl": [
+        "E886"
+      ],
+      "description": "Tuplet number 6 (sextuplet)"
     }
   ],
   "normalization": {

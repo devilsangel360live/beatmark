@@ -2,7 +2,19 @@ import type { InstrumentId } from "../core/drumKit";
 import { findEvent, timeSignatureAt } from "../core/score";
 import { DURATION_LABELS, DURATION_VALUES, type DurationValue } from "../core/time";
 import { useEditor } from "../store/editor";
-import { addMeasures, changeDuration, changeInstrument, deleteSelection, loopSelection, toggleArticulation, toggleDot } from "./actions";
+import { DYNAMICS, type Dynamic } from "../core/project";
+import {
+  addMeasures,
+  changeDuration,
+  changeInstrument,
+  deleteSelection,
+  loopSelection,
+  setDynamic,
+  toggleArticulation,
+  toggleDot,
+  toggleTie,
+  toggleTriplet,
+} from "./actions";
 
 /** MuseScore-style duration keys. */
 export const DURATION_KEYS: Record<string, DurationValue> = { "3": "32", "4": "16", "5": "8", "6": "q", "7": "h", "8": "w" };
@@ -37,7 +49,7 @@ function NoteInputSection() {
             role="radio"
             aria-checked={d.value === v}
             className={d.value === v ? "active" : ""}
-            onClick={() => changeDuration({ value: v, dots: d.dots })}
+            onClick={() => changeDuration(d.tuplet ? { value: v, dots: 0, tuplet: d.tuplet } : { value: v, dots: d.dots })}
             title={`${DURATION_LABELS[v]} (${KEY_FOR[v]})`}
           >
             {DURATION_LABELS[v]}
@@ -46,6 +58,9 @@ function NoteInputSection() {
         ))}
         <button className={d.dots ? "active" : ""} aria-pressed={!!d.dots} onClick={toggleDot} title="Dotted (.)">
           Dotted <kbd>.</kbd>
+        </button>
+        <button className={d.tuplet ? "active" : ""} aria-pressed={!!d.tuplet} onClick={toggleTriplet} title="Triplet: three notes in the time of two">
+          Triplet <kbd>3:2</kbd>
         </button>
       </div>
     </section>
@@ -93,7 +108,8 @@ function SelectionSection() {
         </label>
         <p className="hint">
           Bar {found.measureIndex + project.score.firstMeasureNumber}, {DURATION_LABELS[e.duration.value].toLowerCase()}
-          {e.duration.dots ? " (dotted)" : ""}. ←/→ move, ↑/↓ change drum.
+          {e.duration.dots ? " (dotted)" : ""}
+          {e.duration.tuplet ? " triplet" : ""}. ←/→ move, ↑/↓ change drum.
         </p>
         <div className="row">
           <button className={e.articulations.includes("accent") ? "active" : ""} onClick={() => toggleArticulation("accent")}>
@@ -101,6 +117,15 @@ function SelectionSection() {
           </button>
           <button className={e.articulations.includes("ghost") ? "active" : ""} onClick={() => toggleArticulation("ghost")}>
             Ghost <kbd>G</kbd>
+          </button>
+          <button className={e.articulations.includes("flam") ? "active" : ""} onClick={() => toggleArticulation("flam")}>
+            Flam
+          </button>
+          <button className={e.articulations.includes("drag") ? "active" : ""} onClick={() => toggleArticulation("drag")}>
+            Drag
+          </button>
+          <button className={e.tie ? "active" : ""} onClick={toggleTie} title="Tie to the next note on this drum">
+            Tie
           </button>
           <button className="danger" onClick={deleteSelection}>
             Delete <kbd>⌫</kbd>
@@ -133,6 +158,20 @@ function SelectionSection() {
               })
             }
           />
+        </label>
+        <label>
+          Dynamic at start
+          <select
+            value={project.score.measures[start].dynamic ?? ""}
+            onChange={(ev) => setDynamic(start, (ev.target.value || undefined) as Dynamic | undefined)}
+          >
+            <option value="">None</option>
+            {DYNAMICS.map((dyn) => (
+              <option key={dyn} value={dyn}>
+                {dyn}
+              </option>
+            ))}
+          </select>
         </label>
         <button className="danger" onClick={deleteSelection}>
           Delete measure{start === end ? "" : "s"}

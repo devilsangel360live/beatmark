@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDemoProject } from "../core/project";
+import { createDemoProject, createProject } from "../core/project";
 import { beamGroupTicks, beamsFor, exportMusicXml } from "./musicxml";
 
 describe("exportMusicXml", () => {
@@ -53,6 +53,31 @@ describe("exportMusicXml", () => {
     const { xml } = exportMusicXml(createDemoProject());
     expect(xml).toContain('<beam number="1">begin</beam>');
     expect(xml).toContain('<beam number="1">end</beam>');
+  });
+
+  it("writes tuplets, ties, grace notes and dynamics", () => {
+    const p = createProject();
+    const triplet = { value: "8", dots: 0, tuplet: 3 } as const;
+    const q = { value: "q", dots: 0 } as const;
+    const m = p.score.measures[0];
+    m.dynamic = "mf";
+    m.events.push(
+      ...[0, 160, 320].map((offset, k) => ({ id: `t${k}`, offset, duration: triplet, instrument: "snare" as const, articulations: [] })),
+      { id: "fl", offset: 480, duration: q, instrument: "snare", articulations: ["flam"] },
+      { id: "c1", offset: 1440, duration: q, instrument: "crash", articulations: [], tie: true },
+    );
+    p.score.measures[1].events.push({ id: "c2", offset: 0, duration: q, instrument: "crash", articulations: [] });
+    const { xml } = exportMusicXml(p);
+
+    expect(xml).toContain("<dynamics><mf/></dynamics>");
+    expect(xml.match(/<time-modification><actual-notes>3<\/actual-notes><normal-notes>2<\/normal-notes><\/time-modification>/g)).toHaveLength(3);
+    expect(xml).toContain('<tuplet type="start" bracket="no"/>');
+    expect(xml).toContain('<tuplet type="stop" bracket="no"/>');
+    expect(xml).toMatch(/<grace slash="yes"\/>.*<type>eighth<\/type>/);
+    expect(xml).toContain('<tie type="start"/>');
+    expect(xml).toContain('<tie type="stop"/>');
+    // Triplet eighths last 160 divisions (480 per quarter).
+    expect(xml).toContain("<duration>160</duration>");
   });
 
   it("warns about unresolved notes instead of exporting them silently", () => {

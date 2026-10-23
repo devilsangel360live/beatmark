@@ -24,16 +24,16 @@ The detector never sees the drum key. It finds "an x notehead at staff step 9", 
 
 ## Classes
 
-[`classes.json`](classes.json) is the source of truth (29 classes). Each class lists its SMuFL glyph codes, which is how the generator labels symbols automatically.
+[`classes.json`](classes.json) is the source of truth (35 classes). Each class lists its SMuFL glyph codes, which is how the generator labels symbols automatically.
 
 | Group | Classes |
 |---|---|
-| Noteheads | `head_black`, `head_half`, `head_whole`, `head_x`, `head_circle_x`, `head_slash` |
-| Rests | `rest_whole`, `rest_half`, `rest_quarter`, `rest_8th`, `rest_16th`, `rest_32nd` |
-| Rhythm | `flag_8th`, `flag_16th`, `flag_32nd`, `beam`, `dot` |
+| Noteheads | `head_black`, `head_half`, `head_whole`, `head_x`, `head_circle_x`, `head_slash`, `grace_head` (flams and drags) |
+| Rests | `rest_whole`, `rest_half`, `rest_quarter`, `rest_8th`, `rest_16th`, `rest_32nd`, `multirest` (the bar; its count uses the `timesig_N` digits) |
+| Rhythm | `flag_8th`, `flag_16th`, `flag_32nd`, `beam`, `dot`, `tie`, `tuplet_3`, `tuplet_6` |
 | Header | `clef_percussion`, `timesig_0` … `timesig_9` |
-| Articulation | `accent` |
-| Later (P1) | `ghost_parens`, `open_o`, `flam_grace`, `roll_tremolo`, `sticking_R`, `sticking_L`, tempo marking |
+| Articulation and dynamics | `accent`, `dynamic` |
+| Later | `ghost_parens`, `open_o`, `roll_tremolo`, `sticking_R`, `sticking_L`, repeat signs, D.S./Coda, tempo marking |
 
 Stems, barlines, staff lines and ledger lines are found with classic CV, not learned.
 

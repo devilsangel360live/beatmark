@@ -15,6 +15,7 @@ from tqdm import tqdm
 from omr.common import load_checkpoint, pick_device
 from omr.data import SymbolDataset
 from omr.metrics import Scorer
+from omr.postprocess import postprocess
 
 
 def main() -> None:
@@ -23,6 +24,7 @@ def main() -> None:
     ap.add_argument("split_dir", help="folder containing labels.jsonl and images/")
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--raw", action="store_true", help="score the detector alone, without the grace-note size rule")
     args = ap.parse_args()
 
     device = pick_device(args.device)
@@ -32,7 +34,8 @@ def main() -> None:
     with torch.no_grad():
         for i in tqdm(range(len(ds)), desc="scoring"):
             image, target = ds[i]
-            scorer.add(model([image.to(device)])[0], target)
+            pred = {k: v.cpu() for k, v in model([image.to(device)])[0].items()}
+            scorer.add(pred if args.raw else postprocess(pred), target)
     print(scorer.table())
 
 

@@ -6,6 +6,11 @@ export type DurationValue = "w" | "h" | "q" | "8" | "16" | "32";
 export interface NoteDuration {
   value: DurationValue;
   dots: 0 | 1;
+  /**
+   * Tuplet number shown over the group: 3 = triplet (3 in the time of 2),
+   * 6 = sextuplet (6 in the time of 4). Both play at 2/3 of the written value.
+   */
+  tuplet?: 3 | 6;
 }
 
 export interface TimeSignature {
@@ -35,7 +40,13 @@ export const DURATION_LABELS: Record<DurationValue, string> = {
 
 export function durationTicks(d: NoteDuration): number {
   const base = BASE_TICKS[d.value];
-  return d.dots ? base + base / 2 : base;
+  const written = d.dots ? base + base / 2 : base;
+  return d.tuplet ? Math.round((written * 2) / 3) : written;
+}
+
+/** Ticks spanned by one complete tuplet group of this duration (e.g. three triplet eighths = one quarter). */
+export function tupletGroupTicks(d: NoteDuration): number {
+  return d.tuplet ? durationTicks(d) * d.tuplet : durationTicks(d);
 }
 
 export function measureTicks(ts: TimeSignature): number {

@@ -21,6 +21,7 @@ from tqdm import tqdm
 from omr.common import TRAINING_DIR, build_model, pick_device
 from omr.data import SymbolDataset, collate
 from omr.metrics import Scorer
+from omr.postprocess import postprocess
 
 
 def main() -> None:
@@ -64,8 +65,21 @@ def main() -> None:
 
     model = build_model(pretrained=not (args.resume or args.init))
     if args.init:
-        model.load_state_dict(torch.load(args.init, map_location="cpu", weights_only=True)["model"])
-        print(f"Starting from {args.init}")
+        old = torch.load(args.init, map_location="cpu", weights_only=True)["model"]
+        current = model.state_dict()
+        grown = []
+        for k, v in old.items():
+            if k not in current:
+                continue
+            if current[k].shape == v.shape:
+                current[k] = v
+            elif current[k].shape[1:] == v.shape[1:] and current[k].shape[0] > v.shape[0]:
+                # Classes were appended to classes.json, so the old outputs keep their meaning:
+                # copy them into the first rows and let only the new classes start from scratch.
+                current[k][: v.shape[0]] = v
+                grown.append(k)
+        model.load_state_dict(current)
+        print(f"Starting from {args.init}" + (f" (extended for new classes: {', '.join(grown)})" if grown else ""))
     model.to(device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=1e-4)
@@ -131,7 +145,8 @@ def validate(model, ds, device, limit: int) -> Scorer:
     scorer = Scorer()
     for i in tqdm(range(min(limit, len(ds))), desc="validating", leave=False):
         image, target = ds[i]
-        pred = model([image.to(device)])[0]
+        # Score what the app will see: the model's output after the size rule for grace notes.
+        pred = postprocess({k: v.cpu() for k, v in model([image.to(device)])[0].items()})
         scorer.add(pred, target)
     model.train()
     return scorer

@@ -1,0 +1,4 @@
+# ONNX Runtime's prebuilt library (pulled in by the `ort` crate) targets macOS 13.4+,
+# so the app must too; linking for an older target fails on ___isPlatformVersionAtLeast.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "13.4"

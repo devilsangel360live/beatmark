@@ -255,6 +255,16 @@ kbd {
   width: 100%;
   display: block;
 }
+.source-frame {
+  position: relative;
+}
+.source-highlight {
+  position: absolute;
+  pointer-events: none;
+  background: var(--accent-soft);
+  outline: 2px solid var(--accent);
+  border-radius: 2px;
+}
 .empty {
   color: var(--muted);
 }

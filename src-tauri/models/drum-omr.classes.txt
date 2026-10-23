@@ -28,3 +28,9 @@ timesig_8
 timesig_9
 accent
 head_slash
+grace_head
+dynamic
+multirest
+tie
+tuplet_3
+tuplet_6

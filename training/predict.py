@@ -14,6 +14,7 @@ import cv2
 import torch
 
 from omr.common import load_checkpoint, pick_device
+from omr.postprocess import postprocess
 from show_labels import draw
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
@@ -35,12 +36,13 @@ def main() -> None:
 
     files = []
     for p in map(Path, args.inputs):
-        files += sorted(f for f in p.rglob("*") if f.suffix.lower() in IMAGE_EXTS) if p.is_dir() else [p]
+        # Skip prepare_real.py's debug/ overviews: they are whole pages, not staff crops.
+        files += sorted(f for f in p.rglob("*") if f.suffix.lower() in IMAGE_EXTS and "debug" not in f.parts) if p.is_dir() else [p]
     for f in files:
         bgr = cv2.imread(str(f))
         tensor = torch.from_numpy(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).permute(2, 0, 1).float() / 255.0
         with torch.no_grad():
-            pred = model([tensor.to(device)])[0]
+            pred = postprocess({k: v.cpu() for k, v in model([tensor.to(device)])[0].items()})
         keep = pred["scores"] >= args.threshold
         boxes = pred["boxes"][keep].cpu().tolist()
         labels = [l - 1 for l in pred["labels"][keep].cpu().tolist()]

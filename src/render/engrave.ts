@@ -1,7 +1,23 @@
-import { Annotation, Articulation, Beam, Dot, Formatter, Renderer, Stave, StaveNote, Stem, Voice } from "vexflow/bravura";
+import {
+  Annotation,
+  Articulation,
+  Beam,
+  Dot,
+  Formatter,
+  GraceNote,
+  GraceNoteGroup,
+  Renderer,
+  Stave,
+  StaveNote,
+  StaveTie,
+  Stem,
+  Tuplet,
+  VexFlow,
+  Voice,
+} from "vexflow/bravura";
 import { findInstrument, staffStepToPitch, type InstrumentDef, type Limb } from "../core/drumKit";
-import type { Measure, Project } from "../core/project";
-import { chordsForLimb, timeSignatureAt, validateMeasure, type MeasureIssue } from "../core/score";
+import type { Dynamic, Measure, Project } from "../core/project";
+import { chordsForLimb, tieTargets, timeSignatureAt, tupletGroups, validateMeasure, type MeasureIssue } from "../core/score";
 import { durationTicks, measureTicks, restsForGap, type NoteDuration, type TimeSignature } from "../core/time";
 
 const MARGIN_X = 12;
@@ -65,8 +81,11 @@ export function engrave(host: HTMLDivElement, project: Project, { width, selecte
 
   const out: ScoreLayout = { measures: [], notes: [], height };
   const z = (v: number) => v * zoom;
+  const ties = tieTargets(score);
 
   for (let sys = 0; sys < systems; sys++) {
+    // Ties can cross barlines, so they are drawn once the whole system is laid out.
+    const anchors = new Map<string, TieAnchor>();
     const first = sys * perSystem;
     const count = Math.min(perSystem, score.measures.length - first);
     const y = MARGIN_TOP + sys * SYSTEM_HEIGHT;
@@ -107,6 +126,9 @@ export function engrave(host: HTMLDivElement, project: Project, { width, selecte
       new Formatter().joinVoices(voices).formatToStave(voices, stave);
       voices.forEach((v) => v.draw(ctx, stave));
       beams.forEach((b) => b.setContext(ctx).draw());
+      built.forEach((b) => b.tuplets.forEach((t) => t.setContext(ctx).draw()));
+      built.forEach((b) => b.anchors.forEach((a, id) => anchors.set(id, a)));
+      if (measure.dynamic) drawDynamic(ctx, stave, measure.dynamic);
 
       const offsetsX = collectTickXs(voices, built.map((b) => b.offsets));
       const ticks = measureTicks(ts);
@@ -132,8 +154,29 @@ export function engrave(host: HTMLDivElement, project: Project, { width, selecte
       });
       x += w;
     }
+
+    for (const [fromId, toId] of ties) {
+      const from = anchors.get(fromId);
+      const to = anchors.get(toId);
+      if (!from && !to) continue;
+      // A tie leaving or entering this system is drawn as a half tie to or from the edge.
+      new StaveTie({
+        firstNote: from?.note ?? null,
+        lastNote: to?.note ?? null,
+        firstIndexes: from ? [from.index] : to ? [to.index] : [0],
+        lastIndexes: to ? [to.index] : from ? [from.index] : [0],
+      })
+        .setContext(ctx)
+        .draw();
+    }
   }
   return out;
+}
+
+interface TieAnchor {
+  note: StaveNote;
+  /** Which notehead of the chord the tie attaches to. */
+  index: number;
 }
 
 interface BuiltVoice {
@@ -141,6 +184,50 @@ interface BuiltVoice {
   /** Measure offset of each tickable, in voice order. */
   offsets: number[];
   hits: { note: StaveNote; ids: string[] }[];
+  tuplets: Tuplet[];
+  /** Every note's notehead, by event id, for drawing ties. */
+  anchors: Map<string, TieAnchor>;
+}
+
+/** SMuFL's single glyph for each marking (dynamicPP, dynamicMF, ...), as engraving programs use. */
+const DYNAMIC_GLYPHS: Record<Dynamic, string> = {
+  pp: "",
+  p: "",
+  mp: "",
+  mf: "",
+  f: "",
+  ff: "",
+};
+
+function drawDynamic(ctx: ReturnType<Renderer["getContext"]>, stave: Stave, dynamic: Dynamic): void {
+  const space = stave.getSpacingBetweenLines();
+  ctx.save();
+  ctx.setFont(VexFlow.getFonts()[0], space * 3.2);
+  // Below the bass-drum stems and beams, which reach about 3.5 spaces under the staff.
+  ctx.fillText(DYNAMIC_GLYPHS[dynamic], stave.getNoteStartX() + 2, stave.getYForLine(4) + space * 5.2);
+  ctx.restore();
+}
+
+let graceIds = 0;
+
+/**
+ * Small notes before the hit: one slashed eighth for a flam, two beamed 16ths for a drag.
+ * Their SVG groups get ids starting "vf-grace-", which the training-data generator uses to
+ * tell grace notes from normal ones (both use the same notehead glyph, just smaller).
+ */
+function graceGroup(key: string, kind: "flam" | "drag"): GraceNoteGroup {
+  const tag = <T extends { setAttribute(name: string, value: string): unknown }>(el: T) => {
+    el.setAttribute("id", `grace-${++graceIds}`);
+    return el;
+  };
+  if (kind === "flam") {
+    return new GraceNoteGroup([tag(new GraceNote({ keys: [key], duration: "8", slash: true, stemDirection: Stem.UP }))], false);
+  }
+  const graces = [0, 1].map(() => tag(new GraceNote({ keys: [key], duration: "16", stemDirection: Stem.UP })));
+  const group = new GraceNoteGroup(graces, false).beamNotes();
+  // VexFlow keeps the grace beams private to the group.
+  (group as unknown as { beams: Beam[] }).beams.forEach(tag);
+  return group;
 }
 
 /** Notes and the rests between them, in time order, for one limb. */
@@ -181,6 +268,7 @@ function buildVoice(
   const restKey = !twoVoices ? "b/4" : limb === "hands" ? "e/5" : "f/4";
   const items = voiceItems(measure, map, limb, ts);
   const hits: BuiltVoice["hits"] = [];
+  const anchors = new Map<string, TieAnchor>();
 
   const notes = items.map(({ duration, chord }) => {
     if (!chord) {
@@ -202,13 +290,32 @@ function buildVoice(
     });
     // Color alone isn't enough to mark something needing review (NFR-05).
     if (events.some((e) => e.unresolved)) note.addModifier(new Annotation("?").setVerticalJustification(1), 0);
+    // One grace group per chord, on the drum that carries the flam or drag.
+    const ornamented = events.findIndex((e) => e.articulations.includes("flam") || e.articulations.includes("drag"));
+    if (ornamented >= 0) {
+      const kind = events[ornamented].articulations.includes("drag") ? "drag" : "flam";
+      note.addModifier(graceGroup(keys[ornamented], kind), 0);
+    }
+    events.forEach((e, k) => anchors.set(e.id, { note, index: k }));
     hits.push({ note, ids: events.map((e) => e.id) });
     return note;
   });
 
+  // Tuplets change the notes' tick values, so they must exist before formatting.
+  const tuplets = tupletGroups(items).map(
+    (g) =>
+      new Tuplet(notes.slice(g.first, g.last + 1), {
+        numNotes: g.tuplet,
+        notesOccupied: g.notesOccupied,
+        location: limb === "hands" ? 1 : -1,
+        // Drum charts print "6", not "6:4".
+        ratioed: false,
+      }),
+  );
+
   const voice = new Voice({ numBeats: ts.beats, beatValue: ts.beatUnit }).setMode(Voice.Mode.SOFT);
   voice.addTickables(notes);
-  return { voice, offsets: items.map((i) => i.offset), hits };
+  return { voice, offsets: items.map((i) => i.offset), hits, tuplets, anchors };
 }
 
 function vexKey(def: InstrumentDef): string {

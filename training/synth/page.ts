@@ -10,7 +10,8 @@ import { VerovioToolkit } from "verovio/esm";
 import { exportMusicXml } from "../../src/io/musicxml";
 import { engrave } from "../../src/render/engrave";
 import classesFile from "../classes.json";
-import { makeRng, randomGroove } from "./grooves";
+import { emptyMeasure } from "../../src/core/project";
+import { makeRng, randomGroove, randomRestRun } from "./grooves";
 
 export interface SampleRequest {
   seed: number;
@@ -30,8 +31,14 @@ export interface SampleResult {
 
 const { classes, normalization } = classesFile;
 const TARGET_SPACE = normalization.staff_space_px;
-const BEAM = classes.findIndex((c) => c.name === "beam");
-const DOT = classes.findIndex((c) => c.name === "dot");
+const id = (name: string) => classes.findIndex((c) => c.name === name);
+const BEAM = id("beam");
+const DOT = id("dot");
+const GRACE_HEAD = id("grace_head");
+const TIE = id("tie");
+const MULTIREST = id("multirest");
+const NOTEHEADS = new Set(["head_black", "head_half", "head_whole", "head_x", "head_circle_x", "head_slash"].map(id));
+const FLAGS = new Set(["flag_8th", "flag_16th", "flag_32nd"].map(id));
 const CLASS_BY_CODEPOINT = new Map<string, number>();
 classes.forEach((c, i) => c.smufl.forEach((cp) => CLASS_BY_CODEPOINT.set(cp.toUpperCase(), i)));
 
@@ -60,7 +67,17 @@ async function render(req: SampleRequest): Promise<SampleResult> {
     engrave(host, project, { width, selected: new Set(), showTempo: rng.chance(0.4) });
   } else {
     const tk = await getVerovio();
-    const xml = exportMusicXml(project).xml;
+    // Multi-bar rests: insert empty bars and ask Verovio to draw them as one "N" bar.
+    const run = randomRestRun(req.seed, project.score.measures.length);
+    if (run) project.score.measures.splice(run.at, 0, ...Array.from({ length: run.count }, emptyMeasure));
+    let xml = exportMusicXml(project).xml;
+    if (run) {
+      const number = project.score.firstMeasureNumber + run.at;
+      xml = xml.replace(
+        `<measure number="${number}">`,
+        `<measure number="${number}"><attributes><measure-style><multiple-rest>${run.count}</multiple-rest></measure-style></attributes>`,
+      );
+    }
     const base = await calibratedScale(tk, req.font, xml);
     tk.setOptions({ ...verovioOptions(req.font, base * req.scaleJitter), spacingNonLinear: 0.5 + rng.next() * 0.3 });
     tk.loadData(xml);
@@ -86,6 +103,8 @@ function verovioOptions(font: string, scale: number) {
     font,
     scale,
     breaks: "none",
+    // Always the thick bar with a number, never old-style "church rest" symbols.
+    multiRestStyle: "default",
     adjustPageHeight: true,
     adjustPageWidth: true,
     header: "none",
@@ -139,21 +158,55 @@ function collectBoxes(svg: SVGSVGElement, clip: SampleResult["clip"]): SampleRes
   const raw: [number, DOMRect][] = [];
   // Glyphs: VexFlow draws <text> with a SMuFL character; Verovio draws <use href="#E0A4-...">.
   const classOf = (cp: string | undefined) => (cp ? CLASS_BY_CODEPOINT.get(cp.toUpperCase()) : undefined);
+  const useClass = (u: Element) => classOf(/^#?([0-9A-F]{4})/i.exec(u.getAttribute("href") ?? u.getAttribute("xlink:href") ?? "")?.[1]);
+
+  // Grace notes reuse the normal notehead and flag glyphs at about 75% size, so they need context.
+  // VexFlow: Beatmark's renderer gives their groups ids starting "vf-grace-".
+  const inVexGrace = (el: Element) => !!el.closest('[id^="vf-grace-"]');
+  // Verovio: compare each glyph's scale with the full-size noteheads in the same drawing.
+  const uses = [...svg.querySelectorAll("use")];
+  const fullScale = Math.max(0, ...uses.filter((u) => NOTEHEADS.has(useClass(u) ?? -1)).map(useScale));
+  const isGraceUse = (u: Element) => useScale(u) < 0.85 * fullScale;
+
   svg.querySelectorAll("text").forEach((t) => {
     // One <text> can hold several glyphs, e.g. the "1" and "2" of a 12/8 time signature.
     [...(t.textContent ?? "")].forEach((ch, k) => {
       const cls = classOf(ch.codePointAt(0)?.toString(16));
-      if (cls !== undefined) raw.push([cls, inkRect(t, k)]);
+      if (cls === undefined) return;
+      if (inVexGrace(t)) {
+        // Grace noteheads get their own class; grace flags are left unlabelled.
+        if (NOTEHEADS.has(cls)) raw.push([GRACE_HEAD, inkRect(t, k)]);
+        return;
+      }
+      raw.push([cls, inkRect(t, k)]);
     });
   });
-  svg.querySelectorAll("use").forEach((u) => {
-    const href = u.getAttribute("href") ?? u.getAttribute("xlink:href") ?? "";
-    const cls = classOf(/^#?([0-9A-F]{4})/i.exec(href)?.[1]);
-    if (cls !== undefined) raw.push([cls, u.getBoundingClientRect()]);
+  for (const u of uses) {
+    const cls = useClass(u);
+    if (cls === undefined) continue;
+    if ((NOTEHEADS.has(cls) || FLAGS.has(cls)) && isGraceUse(u)) {
+      if (NOTEHEADS.has(cls)) raw.push([GRACE_HEAD, u.getBoundingClientRect()]);
+      continue;
+    }
+    raw.push([cls, u.getBoundingClientRect()]);
+  }
+  // Beams are plain filled shapes, one per beam line; the small beams of a drag are skipped.
+  svg.querySelectorAll(".vf-beam path").forEach((b) => {
+    if (!inVexGrace(b)) raw.push([BEAM, b.getBoundingClientRect()]);
   });
-  // Beams are plain filled shapes, one per beam line. Verovio draws dots as ellipses.
-  svg.querySelectorAll(".vf-beam path, .beam > polygon").forEach((b) => raw.push([BEAM, b.getBoundingClientRect()]));
+  svg.querySelectorAll(".beam > polygon").forEach((b) => {
+    const head = b.parentElement?.querySelector(".notehead use");
+    if (!head || !isGraceUse(head)) raw.push([BEAM, b.getBoundingClientRect()]);
+  });
+  // Verovio draws dots as ellipses.
   svg.querySelectorAll(".dots ellipse").forEach((d) => raw.push([DOT, d.getBoundingClientRect()]));
+  svg.querySelectorAll(".vf-stavetie path, .tie path").forEach((t) => raw.push([TIE, t.getBoundingClientRect()]));
+  // A multi-bar rest's thick bar (and its end serifs) as one box; its number is labelled by glyph.
+  svg.querySelectorAll(".multiRest").forEach((m) => {
+    const parts = [...m.querySelectorAll("polygon, rect, path")].filter((p) => !p.closest(".multiRestNum"));
+    const union = unionRect(parts.map((p) => p.getBoundingClientRect()));
+    if (union) raw.push([MULTIREST, union]);
+  });
 
   // Ink outside the SVG's own area isn't drawn, so it must not be labelled either.
   const view = svg.getBoundingClientRect();
@@ -190,6 +243,22 @@ function inkRect(t: SVGTextElement, index = 0): DOMRect {
 }
 
 const round = (v: number) => Math.round(v * 10) / 10;
+
+/** Verovio positions glyphs with transform="translate(x, y) scale(s, s)". */
+function useScale(u: Element): number {
+  const m = /scale\(\s*([\d.]+)/.exec(u.getAttribute("transform") ?? "");
+  return m ? Number(m[1]) : 1;
+}
+
+function unionRect(rects: DOMRect[]): DOMRect | null {
+  const visible = rects.filter((r) => r.width > 0 && r.height > 0);
+  if (!visible.length) return null;
+  const left = Math.min(...visible.map((r) => r.left));
+  const top = Math.min(...visible.map((r) => r.top));
+  const right = Math.max(...visible.map((r) => r.right));
+  const bottom = Math.max(...visible.map((r) => r.bottom));
+  return new DOMRect(left, top, right - left, bottom - top);
+}
 
 async function ready(): Promise<void> {
   await Promise.all(["Bravura", "Gonville", "Petaluma", "Academico"].map((f) => document.fonts.load(`30px ${f}`)));

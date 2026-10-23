@@ -66,32 +66,68 @@ def find_staves(gray: np.ndarray) -> list[dict]:
 
     # Each staff line is a peak in the row profile. Beams make peaks too, so a staff is
     # five peaks at an even spacing, with any extra peaks in between ignored.
-    peaks = [y for y in range(1, len(rows) - 1) if rows[y] >= min_len and rows[y] >= rows[y - 1] and rows[y] > rows[y + 1]]
-    staves, used = [], set()
+    peaks = line_centers(rows, min_len)
+    strength = lambda p: rows[int(round(p))]
+    staves, used_until = [], float("-inf")
     for a, first in enumerate(peaks):
-        if first in used:
+        # Skip everything up to the bottom of the staff just found (as the Rust port does).
+        if first <= used_until:
             continue
         for second in peaks[a + 1 : a + 4]:
             gap = second - first
             if gap < 4:
                 continue
-            lines = [first]
-            for k in range(1, 5):
-                target = first + k * gap
-                near = [p for p in peaks if abs(p - target) <= max(1.5, 0.15 * gap)]
+            lines = [first, second]
+            # Collect up to seven evenly spaced lines: a row of beams or noteheads one space
+            # outside the staff can line up with it, and must not displace a real line.
+            while len(lines) < 7:
+                # Re-estimate the spacing from the lines found so far, so rounding doesn't add up.
+                gap = (lines[-1] - lines[0]) / (len(lines) - 1)
+                target = lines[-1] + gap
+                near = [p for p in peaks if abs(p - target) <= max(1.5, 0.2 * gap)]
                 if not near:
                     break
                 lines.append(min(near, key=lambda p: abs(p - target)))
-            strengths = [rows[y] for y in lines]
+            if len(lines) < 5:
+                continue
+            # The real staff is the run of five whose weakest line is strongest.
+            start = max(range(len(lines) - 4), key=lambda i: min(strength(y) for y in lines[i : i + 5]))
+            lines = lines[start : start + 5]
+            strengths = [strength(y) for y in lines]
+            # Inside a real staff the only full-length lines are its own five. Without this,
+            # lines from five different staves that happen to be evenly spaced (e.g. the top
+            # line of each staff on a page) pass as one giant "staff".
+            weakest = min(strengths)
+            intruders = [p for p in peaks if lines[0] < p < lines[-1] and p not in lines and strength(p) >= 0.5 * weakest]
             # Lines of one staff are about equally long; a stray beam isn't.
-            if len(lines) == 5 and min(strengths) >= 0.5 * max(strengths):
-                band = lines_only[lines[0] - 1 : lines[-1] + 2]
+            if weakest >= 0.5 * max(strengths) and not intruders:
+                band = lines_only[int(lines[0]) - 1 : int(lines[-1]) + 3]
                 cols = np.where(band.sum(axis=0) >= 3)[0]
                 staves.append({"top": float(lines[0]), "bottom": float(lines[-1]), "space": (lines[-1] - lines[0]) / 4,
                                "left": int(cols.min()), "right": int(cols.max())})
-                used.update(p for p in peaks if lines[0] - 1 <= p <= lines[-1] + 1)
+                used_until = lines[-1] + 1
                 break
     return staves
+
+
+def line_centers(rows: np.ndarray, min_len: int) -> list[float]:
+    """
+    Center of each local maximum in the row profile. A line two or three pixels thick is a
+    flat-topped peak; its center can fall between rows (e.g. 813.5), and that half pixel matters
+    when five lines must line up.
+    """
+    centers, y = [], 1
+    while y < len(rows) - 1:
+        if rows[y] >= min_len and rows[y] > rows[y - 1]:
+            end = y
+            while end + 1 < len(rows) and rows[end + 1] == rows[y]:
+                end += 1
+            if end + 1 < len(rows) and rows[end + 1] < rows[y]:
+                centers.append((y + end) / 2)
+            y = end + 1
+        else:
+            y += 1
+    return centers
 
 
 def crop_staff(gray: np.ndarray, staff: dict) -> tuple[np.ndarray, list[int]]:

@@ -1,6 +1,6 @@
 import { findInstrument, type InstrumentDef, type InstrumentId, type Limb } from "./drumKit";
 import { emptyMeasure, newId, type Measure, type NoteEvent, type Score } from "./project";
-import { durationTicks, largestDurationWithin, measureTicks, type NoteDuration, type TimeSignature } from "./time";
+import { durationTicks, largestDurationWithin, measureTicks, tupletGroupTicks, type NoteDuration, type TimeSignature } from "./time";
 
 export function timeSignatureAt(score: Score, measureIndex: number): TimeSignature {
   for (let i = measureIndex; i >= 0; i--) {
@@ -39,6 +39,70 @@ export function chordsForLimb(measure: Measure, map: InstrumentDef[], limb: Limb
   return [...byOffset.entries()]
     .sort(([a], [b]) => a - b)
     .map(([offset, events]) => ({ offset, duration: events[0].duration, events }));
+}
+
+/**
+ * For each tied note, the note it is tied to: the next note of the same instrument,
+ * in the same or a later measure. Tied-to notes sustain instead of being struck.
+ */
+export function tieTargets(score: Score): Map<string, string> {
+  const targets = new Map<string, string>();
+  const open = new Map<InstrumentId, string>();
+  for (const m of score.measures) {
+    for (const e of [...m.events].sort((a, b) => a.offset - b.offset)) {
+      const from = open.get(e.instrument);
+      if (from) {
+        targets.set(from, e.id);
+        open.delete(e.instrument);
+      }
+      if (e.tie) open.set(e.instrument, e.id);
+    }
+  }
+  return targets;
+}
+
+export interface TupletGroup {
+  /** Index of the first and last item of the group in the voice. */
+  first: number;
+  last: number;
+  tuplet: 3 | 6;
+  /** Written notes the group replaces: 2 for a triplet, 4 for a sextuplet. */
+  notesOccupied: number;
+}
+
+/**
+ * Complete tuplet groups in a voice: `tuplet` consecutive notes of the same tuplet value that
+ * fill one group span starting on the span's boundary. Partial groups are not drawn as tuplets.
+ */
+export function tupletGroups(items: { offset: number; duration: NoteDuration; chord?: unknown }[]): TupletGroup[] {
+  const groups: TupletGroup[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const d = items[i].duration;
+    if (!d.tuplet || !items[i].chord) {
+      i++;
+      continue;
+    }
+    const span = tupletGroupTicks(d);
+    const step = durationTicks(d);
+    const start = items[i].offset;
+    let j = i;
+    while (
+      j + 1 < items.length &&
+      j - i + 1 < d.tuplet &&
+      items[j + 1].chord &&
+      items[j + 1].duration.tuplet === d.tuplet &&
+      items[j + 1].duration.value === d.value &&
+      items[j + 1].offset === items[j].offset + step
+    ) {
+      j++;
+    }
+    if (start % span === 0 && j - i + 1 === d.tuplet) {
+      groups.push({ first: i, last: j, tuplet: d.tuplet, notesOccupied: d.tuplet === 3 ? 2 : 4 });
+    }
+    i = j + 1;
+  }
+  return groups;
 }
 
 export type MeasureIssue =

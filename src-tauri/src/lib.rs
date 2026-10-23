@@ -1,10 +1,10 @@
-mod omr;
+pub mod omr;
 mod package;
 mod sources;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{InvokeBody, Request, Response};
@@ -15,6 +15,9 @@ use tauri::{Manager, State};
 struct AppState {
     data_dir: PathBuf,
     workspace: Mutex<PathBuf>,
+    model_path: PathBuf,
+    /// Loaded on first use (it takes a second or two) and kept for later pages.
+    detector: Arc<Mutex<Option<omr::Detector>>>,
 }
 
 impl AppState {
@@ -74,6 +77,16 @@ fn import_image(state: State<AppState>, path: String) -> CmdResult<sources::Impo
     sources::import_image(Path::new(&path), &state.sources_dir())
 }
 
+/// The bytes of a PDF the user picked, for pdf.js to render page by page. The original stays untouched.
+#[tauri::command]
+fn read_pdf(path: String) -> CmdResult<Response> {
+    let path = Path::new(&path);
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+        return Err("Not a PDF file".into());
+    }
+    fs::read(path).map(Response::new).map_err(|e| format!("Could not read {}: {e}", path.display()))
+}
+
 /// Raw PNG body (e.g. a PDF page rendered in the UI); the original name comes in a header.
 #[tauri::command]
 fn import_png(state: State<AppState>, request: Request) -> CmdResult<sources::ImportedSource> {
@@ -98,11 +111,29 @@ fn read_source(state: State<AppState>, file_name: String) -> CmdResult<Response>
 }
 
 #[tauri::command]
-fn recognize_source(state: State<AppState>, file_name: String) -> CmdResult<omr::Recognition> {
+async fn recognize_source(state: State<'_, AppState>, file_name: String) -> CmdResult<omr::Recognition> {
     if !package::is_safe_name(&file_name) {
         return Err("Invalid source name".into());
     }
-    omr::recognize(&state.sources_dir().join(file_name))
+    let image = state.sources_dir().join(file_name);
+    let detector = state.detector.clone();
+    let model = state.model_path.clone();
+    // A page takes a few seconds; keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut slot = detector.lock().unwrap();
+        if slot.is_none() {
+            if !model.exists() {
+                return Err(format!(
+                    "The recognition model is missing ({}). Export it with training/export_onnx.py.",
+                    model.display()
+                ));
+            }
+            *slot = Some(omr::Detector::load(&model)?);
+        }
+        omr::recognize(&image, slot.as_mut().unwrap())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// For exports (MusicXML); `path` comes from the user's save dialog.
@@ -166,13 +197,27 @@ fn prune_workspaces(data_dir: &Path, keep: &Path) {
     }
 }
 
+/// During development the model is read straight from src-tauri/models; a packaged app ships
+/// it as a bundled resource.
+fn model_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if cfg!(debug_assertions) {
+        return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models").join("drum-omr.onnx"));
+    }
+    Ok(app.path().resolve("models/drum-omr.onnx", tauri::path::BaseDirectory::Resource)?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let state = AppState { data_dir: data_dir.clone(), workspace: Mutex::new(PathBuf::new()) };
+            let state = AppState {
+                data_dir: data_dir.clone(),
+                workspace: Mutex::new(PathBuf::new()),
+                model_path: model_path(app)?,
+                detector: Arc::new(Mutex::new(None)),
+            };
             let ws = state.fresh_workspace()?;
             prune_workspaces(&data_dir, &ws);
             *state.workspace.lock().unwrap() = ws;
@@ -185,6 +230,7 @@ pub fn run() {
             save_project,
             import_image,
             import_png,
+            read_pdf,
             read_source,
             recognize_source,
             write_text_file,

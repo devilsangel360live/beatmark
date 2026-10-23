@@ -25,6 +25,7 @@ tauri-plugin-dialog = "2"
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "tiff"] }
+ort = "2.0.0-rc.15"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

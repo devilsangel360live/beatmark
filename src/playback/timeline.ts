@@ -1,7 +1,7 @@
 import type { InstrumentId } from "../core/drumKit";
 import type { Articulation, Score } from "../core/project";
-import { measureStartTicks, timeSignatureAt } from "../core/score";
-import { beatTicks } from "../core/time";
+import { measureStartTicks, tieTargets, timeSignatureAt } from "../core/score";
+import { beatTicks, PPQ } from "../core/time";
 
 export interface TimelineHit {
   tick: number;
@@ -24,15 +24,26 @@ export interface Timeline {
   measureBeats: { beatTicks: number; count: number }[];
 }
 
+/** How far before the main hit grace notes sound: a flam's single grace, or a drag's two. */
+export const GRACE_LEAD_TICKS = PPQ / 20;
+
 export function buildTimeline(score: Score): Timeline {
   const measureStarts = measureStartTicks(score);
+  const sustained = new Set(tieTargets(score).values());
   const hits: TimelineHit[] = [];
   const beats: Beat[] = [];
   const measureBeats: Timeline["measureBeats"] = [];
   score.measures.forEach((m, i) => {
     const start = measureStarts[i];
     for (const e of m.events) {
-      hits.push({ tick: start + e.offset, instrument: e.instrument, articulations: e.articulations });
+      // The second note of a tie continues the first; it isn't struck again.
+      if (sustained.has(e.id)) continue;
+      const tick = start + e.offset;
+      const graces = e.articulations.includes("drag") ? 2 : e.articulations.includes("flam") ? 1 : 0;
+      for (let g = graces; g > 0; g--) {
+        hits.push({ tick: Math.max(0, tick - g * GRACE_LEAD_TICKS), instrument: e.instrument, articulations: ["ghost"] });
+      }
+      hits.push({ tick, instrument: e.instrument, articulations: e.articulations });
     }
     const ts = timeSignatureAt(score, i);
     const bt = beatTicks(ts);

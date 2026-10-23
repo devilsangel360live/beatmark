@@ -1,21 +1,23 @@
 import { ask } from "@tauri-apps/plugin-dialog";
-import type { Articulation } from "../core/project";
+import type { Articulation, Dynamic } from "../core/project";
 import { createProject, parseProject } from "../core/project";
 import { findInstrument, type InstrumentId } from "../core/drumKit";
 import { deleteMeasures, deleteNotes, findEvent, insertMeasures, measureStartTicks, moveNote, setDuration, setInstrument, timeSignatureAt } from "../core/score";
 import { durationTicks, measureTicks, type NoteDuration } from "../core/time";
 import {
   clearRecovery,
-  importImages,
+  importSources,
   inDesktopApp,
   newProjectWorkspace,
   openProject,
   pickProjectToOpen,
   pickSaveLocation,
+  recognizeSource,
   saveProject,
   saveTextFile,
 } from "../io/backend";
 import { exportMusicXml } from "../io/musicxml";
+import { assemble, type Recognition } from "../omr/assemble";
 import { engine } from "../playback/engine";
 import { selectedNoteIds, useEditor } from "../store/editor";
 import { showError, showStatus } from "./status";
@@ -67,16 +69,67 @@ export async function saveProjectFile(saveAs = false): Promise<void> {
 
 export async function importSourceImages(): Promise<void> {
   try {
-    const sources = await importImages();
+    const sources = await importSources((text) => showStatus(text));
     if (!sources.length) return;
     state().edit("Import source", (p) => {
       p.sources.push(...sources);
     });
     showStatus(
-      `Imported ${sources.length} image(s). Recognition works best on sharp, straight, uncompressed screenshots of standard drum notation.`,
+      `Imported ${sources.length} page(s). Recognition works best on sharp, straight, uncompressed images of standard drum notation.`,
     );
   } catch (e) {
     showError(e);
+  }
+}
+
+/** Set while recognition runs, so the button can't start it twice. */
+let recognizing = false;
+
+/**
+ * Read every source page in order and replace the score with what was recognized.
+ * One undoable edit; doubtful measures and notes come back marked for review.
+ */
+export async function recognizeAllSources(): Promise<void> {
+  if (recognizing) return;
+  const { project } = state();
+  if (!project.sources.length) {
+    showStatus("Import a screenshot or PDF first.", "warning");
+    return;
+  }
+  const hasNotes = project.score.measures.some((m) => m.events.length);
+  if (hasNotes) {
+    const msg = "Replace the current score with the recognized notation? You can undo this.";
+    const ok = inDesktopApp ? await ask(msg, { title: "Recognize notation", kind: "warning", okLabel: "Replace" }) : window.confirm(msg);
+    if (!ok) return;
+  }
+  recognizing = true;
+  try {
+    engine.stop();
+    const pages: { sourceId: string; recognition: Recognition }[] = [];
+    for (const [i, source] of project.sources.entries()) {
+      showStatus(`Reading page ${i + 1} of ${project.sources.length}…`);
+      pages.push({ sourceId: source.id, recognition: await recognizeSource(source.fileName) });
+    }
+    const result = assemble(pages, project.instrumentMap);
+    if (!result.measures.length) {
+      showStatus(result.warnings.join(" ") || "No notation was recognized.", "error");
+      return;
+    }
+    state().edit("Recognize notation", (p) => {
+      p.score.measures = result.measures;
+      if (result.timeSignature) p.score.timeSignature = result.timeSignature;
+      p.score.firstMeasureNumber = 1;
+      p.practice.loop = null;
+    });
+    state().select(null);
+    const { staves, measures, notes, flagged } = result.stats;
+    const review = flagged ? ` ${flagged} measure(s) are marked "? Review" — check them against the source.` : "";
+    const notesText = result.warnings.length ? ` ${result.warnings.join(" ")}` : "";
+    showStatus(`Recognized ${measures} measures and ${notes} notes from ${staves} staves.${review}${notesText}`, flagged || result.warnings.length ? "warning" : "info");
+  } catch (e) {
+    showError(e);
+  } finally {
+    recognizing = false;
   }
 }
 
@@ -198,7 +251,8 @@ export function changeDuration(duration: NoteDuration): void {
 
 export function toggleDot(): void {
   const d = state().inputDuration;
-  changeDuration({ ...d, dots: d.dots ? 0 : 1 });
+  // Dotted tuplets aren't supported, so dotting a value leaves triplet mode.
+  changeDuration({ value: d.value, dots: d.dots ? 0 : 1 });
 }
 
 /** Arrow left/right: move selected notes by the current input duration, within their measure. */
@@ -218,6 +272,32 @@ export function nudge(direction: 1 | -1): void {
   );
 }
 
+const EXCLUSIVE: Record<Articulation, Articulation> = { accent: "ghost", ghost: "accent", flam: "drag", drag: "flam" };
+
+/** Tie the selected notes to the next note of the same drum. */
+export function toggleTie(): void {
+  const ids = selectedNoteIds(state().selection);
+  if (!ids.length) return;
+  state().edit("Toggle tie", (p) =>
+    ids.forEach((id) => {
+      const found = findEvent(p.score, id);
+      if (found) found.event.tie = !found.event.tie;
+    }),
+  );
+}
+
+/** Switch note input between plain and triplet values (the selected notes change too). */
+export function toggleTriplet(): void {
+  const d = state().inputDuration;
+  changeDuration(d.tuplet ? { value: d.value, dots: d.dots } : { value: d.value, dots: 0, tuplet: 3 });
+}
+
+export function setDynamic(measureIndex: number, dynamic: Dynamic | undefined): void {
+  state().edit("Change dynamic", (p) => {
+    p.score.measures[measureIndex].dynamic = dynamic;
+  });
+}
+
 export function toggleArticulation(a: Articulation): void {
   const ids = selectedNoteIds(state().selection);
   if (!ids.length) return;
@@ -226,8 +306,8 @@ export function toggleArticulation(a: Articulation): void {
       const found = findEvent(p.score, id);
       if (!found) return;
       const list = found.event.articulations;
-      // A note can't be both accented and ghosted.
-      const other: Articulation = a === "accent" ? "ghost" : "accent";
+      // A note can't be both accented and ghosted, or both flammed and dragged.
+      const other = EXCLUSIVE[a];
       found.event.articulations = list.includes(a) ? list.filter((x) => x !== a) : [...list.filter((x) => x !== other), a];
     }),
   );

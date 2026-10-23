@@ -42,6 +42,7 @@ def prelabel(checkpoint: str, crops: Path, out_file: Path, threshold: float) -> 
     import torch
 
     from omr.common import load_checkpoint, pick_device
+    from omr.postprocess import postprocess
 
     device = pick_device()
     model = load_checkpoint(checkpoint, device)
@@ -51,7 +52,7 @@ def prelabel(checkpoint: str, crops: Path, out_file: Path, threshold: float) -> 
         h, w = bgr.shape[:2]
         tensor = torch.from_numpy(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).permute(2, 0, 1).float() / 255.0
         with torch.no_grad():
-            pred = model([tensor.to(device)])[0]
+            pred = postprocess({k: v.cpu() for k, v in model([tensor.to(device)])[0].items()})
         results = []
         for (x0, y0, x1, y1), label, score in zip(pred["boxes"].tolist(), pred["labels"].tolist(), pred["scores"].tolist()):
             if score < threshold:

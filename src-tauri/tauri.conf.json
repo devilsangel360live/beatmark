@@ -32,6 +32,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "models/drum-omr.onnx": "models/drum-omr.onnx",
+      "models/drum-omr.classes.txt": "models/drum-omr.classes.txt"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.4"
+    }
   }
 }

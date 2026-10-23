@@ -22,7 +22,7 @@ Beatmark has to look at a picture of drum music and work out the notes. We split
 |---|---|
 | **Model** | A program with millions of adjustable numbers inside. Before training it knows nothing about music; training adjusts the numbers until its answers are right. Ours is called *Faster R-CNN*, a standard "object detector". |
 | **Object detection** | The task of drawing boxes around things in an image and naming each one. The same technique finds pedestrians in car cameras; we use it for noteheads. |
-| **Class** | One kind of thing the model can name. We have 29 classes: `head_x`, `rest_8th`, `beam` and so on. The full list is in `classes.json`. The model can only ever answer with one of these names. |
+| **Class** | One kind of thing the model can name. We have 35 classes: `head_x`, `rest_8th`, `beam` and so on. The full list is in `classes.json`. The model can only ever answer with one of these names. |
 | **Label** | The correct answer for one training image: a box plus a class name for every symbol. The model learns by comparing its guesses with labels, millions of times. |
 | **Labeling** | Drawing those correct boxes. By hand it's slow: about 60 boxes per staff. |
 | **Synthetic data** | Training images we *generate* instead of collecting. We write random drum grooves, have music software draw them, and because we drew them, we know exactly where every symbol is. **Labels come free.** |
@@ -243,7 +243,7 @@ This writes `src-tauri/models/drum-omr.onnx` (~166 MB) and checks that it gives 
 
 | You want to… | Do this |
 |---|---|
-| Add a symbol type (e.g. flams) | Append a class to the **end** of `classes.json` (never reorder: the position is the id) with its SMuFL code, make `synth/grooves.ts` sometimes produce it, regenerate data, and train from scratch. |
+| Add a symbol type | Append a class to the **end** of `classes.json` (never reorder: the position is the id) with its SMuFL code, make `synth/grooves.ts` sometimes produce it, and regenerate the data. Then fine-tune from your last model with `--init`: the existing classes keep what they learned and only the new ones start from scratch. |
 | Make grooves more like your material | Edit the probabilities in `synth/grooves.ts`. For example, `fillChance` controls tom fills, and `TIME_SIGNATURES` controls meter frequencies. |
 | More variety | Generate more images (`--count 50000`), or add engravers/fonts in `generate.mjs`. |
 | Smaller/faster model for the app | Later: swap the backbone in `omr/common.py` (e.g. MobileNet) and retrain, or quantize the ONNX file. |
@@ -281,7 +281,7 @@ LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true LABEL_STUDIO_LOCAL_FILES_DOCUMENT_
 training/
   GUIDE.md           this file
   README.md          design notes and accuracy targets
-  classes.json       the 29 symbol classes (shared by generator and trainer)
+  classes.json       the 35 symbol classes (shared by generator and trainer)
   pyproject.toml     Python dependencies (uv sync)
   synth/             synthetic data generator (runs in headless Chrome)
     grooves.ts         random drum grooves

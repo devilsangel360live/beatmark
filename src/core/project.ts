@@ -3,7 +3,11 @@ import { PPQ, type NoteDuration, type TimeSignature } from "./time";
 
 export const SCHEMA_VERSION = 1;
 
-export type Articulation = "accent" | "ghost";
+/** "flam" = one grace note before the hit; "drag" = two. */
+export type Articulation = "accent" | "ghost" | "flam" | "drag";
+
+export type Dynamic = "pp" | "p" | "mp" | "mf" | "f" | "ff";
+export const DYNAMICS: Dynamic[] = ["pp", "p", "mp", "mf", "f", "ff"];
 
 export interface NoteEvent {
   id: string;
@@ -16,6 +20,8 @@ export interface NoteEvent {
   confidence?: number;
   /** Recognition could not decide instrument or duration; the user must confirm. */
   unresolved?: boolean;
+  /** Tied to the next note of the same instrument, which then sustains instead of being struck. */
+  tie?: boolean;
 }
 
 export interface Measure {
@@ -23,8 +29,12 @@ export interface Measure {
   /** Overrides the score time signature from this measure onward. */
   timeSignature?: TimeSignature;
   events: NoteEvent[];
+  /** Dynamic marking shown under the start of the measure. */
+  dynamic?: Dynamic;
   /** Lowest confidence among this measure's recognized content. */
   confidence?: number;
+  /** Where a recognized measure came from, for showing it next to the score. */
+  source?: { sourceId: string; box: [number, number, number, number] };
 }
 
 export interface Score {

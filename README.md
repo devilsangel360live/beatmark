@@ -12,6 +12,14 @@ npm run tauri dev      # desktop app
 npm run dev            # UI only, in a browser at http://localhost:1420 (no file access)
 ```
 
+### Recognition model
+
+Reading sheet music needs the trained model at `src-tauri/models/drum-omr.onnx` (plus `drum-omr.classes.txt`). It's too large for git, so produce it with `training/export_onnx.py` (see `training/GUIDE.md`) or copy it in. The app is bundled with it, so builds fail without it.
+
+In the app: **Import image or PDF** (each PDF page becomes a source page), then **Recognize notation**. Every page is read in order and replaces the score as one undoable step. Measures that don't add up, weak detections and notes that match no drum in the drum key are marked for review. Selecting a recognized measure highlights where it came from on the source page.
+
+How it works: `src-tauri/src/omr/` finds staves and barlines and runs the detector (Rust, ONNX Runtime on the CPU); `src/omr/assemble.ts` turns the symbols into timed notes. The app targets macOS 13.4+, a requirement of ONNX Runtime's prebuilt library.
+
 ## Test
 
 ```sh
@@ -40,6 +48,8 @@ npm run typecheck
 - Time is integer ticks, 480 per quarter note. Events store an offset within their measure. Seconds exist only in playback.
 - Hands are written stems-up (voice 1), feet stems-down (voice 2). A chord is the events in one voice at one offset; they share a duration.
 - Rests are derived at render/export time, never stored.
+- Triplets and sextuplets are a `tuplet` on the duration and play at 2/3 of the written value (a triplet eighth is 160 ticks). They're drawn with their number only when a complete group fills its span.
+- A tie (`tie: true`) joins a note to the next note of the same drum, even across a barline; the second note sustains instead of being struck. Flams and drags are articulations, played as quiet grace hits just before the note.
 - The drum key (`instrumentMap`) is per project. The default follows Drumeo's conventions.
 - Edits to score, drum key and title go through `useEditor().edit(label, recipe)` and are undoable. Practice settings (tempo, loop, count-in) and view settings (zoom, bars per line) are saved but not undoable.
 
